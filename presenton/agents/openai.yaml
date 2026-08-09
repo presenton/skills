@@ -1,0 +1,7 @@
+interface:
+  display_name: "Presenton — PPTX, PDF & PNG"
+  short_description: "Creator for polished PPTX, PDF, and PNG files"
+  default_prompt: "Use $presenton to create a PPTX, PDF, or PNG file and return its export URL."
+
+policy:
+  allow_implicit_invocation: true
