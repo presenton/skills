@@ -2,7 +2,9 @@
 
 ## Temporary-file policy
 
-Create working HTML only inside a private directory returned by `mktemp -d`, `tempfile.TemporaryDirectory()`, or the platform's equivalent OS temporary-directory facility. Never write generated HTML or exported PPTX, PDF, PNG, or ZIP files into the workspace, repository, home directory, or another persistent location. Submit the temporary HTML to the API and return the response URL without downloading it.
+Create working HTML only inside the private OS temporary directory returned by `presenton_artifacts.py create-temp`. Never write generated HTML or exported PPTX, PDF, PNG, or ZIP files into the workspace, repository, home directory, or another persistent location. Submit the temporary HTML to the API and return the response URL without downloading it. After all requested exports complete—or after errors, exhausted retries, or interruption—run `presenton_artifacts.py cleanup-temp --path <exact-created-path>` in a `finally`-equivalent step. The helper refuses to remove the OS temporary root, symlinks, and directories it did not create.
+
+When the entire workflow lives inside one Python process, `tempfile.TemporaryDirectory(prefix="presenton-")` is the preferred equivalent because its context manager performs the same cleanup automatically.
 
 ## Required document structure
 
@@ -85,7 +87,7 @@ Do not generate HTML until design search has returned results and one result has
 - corner, border, and shadow language
 - image treatment and chart palette
 
-Apply that system consistently, but choose a content-appropriate layout per slide. Replace all sample styling from the bundled HTML asset. The search result is a mandatory visual brief; no design ID or special markup is sent to html-to-any.
+Apply that system consistently, but choose a content-appropriate layout per slide and generate the complete document from scratch. Do not use a reference presentation HTML or template. The search result is the mandatory visual brief; no design ID or special markup is sent to html-to-any.
 
 ## Preflight checklist
 

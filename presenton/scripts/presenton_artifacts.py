@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 import tempfile
 import threading
@@ -22,6 +23,8 @@ from validate_html import validate_html
 DEFAULT_API_BASE = "https://api.presenton.ai"
 SEARCH_TIMEOUT_SECONDS = 60.0
 EXPORT_TIMEOUT_SECONDS = 300.0
+TEMP_MARKER_NAME = ".presenton-temp"
+TEMP_MARKER_CONTENT = "presenton-owned\n"
 
 
 class PresentonError(RuntimeError):
@@ -86,6 +89,52 @@ def request_json(
         raise PresentonError("Presenton API returned invalid JSON") from exc
 
 
+def get_temp_root() -> Path:
+    return Path(tempfile.gettempdir()).resolve(strict=True)
+
+
+def resolve_owned_temp_dir(path: Path) -> Path:
+    if path.expanduser().is_symlink():
+        raise PresentonError("Refusing to clean up a symbolic link")
+    try:
+        resolved = path.expanduser().resolve(strict=True)
+        temp_root = get_temp_root()
+        resolved.relative_to(temp_root)
+    except (OSError, ValueError) as exc:
+        raise PresentonError("Temporary directory is outside the OS temporary root") from exc
+    if resolved == temp_root:
+        raise PresentonError("Refusing to clean up the OS temporary root")
+    if resolved.parent != temp_root or not resolved.name.startswith("presenton-"):
+        raise PresentonError("Temporary directory was not created by Presenton")
+    if not resolved.is_dir():
+        raise PresentonError("Presenton temporary path is not a directory")
+    marker = resolved / TEMP_MARKER_NAME
+    if marker.is_symlink() or not marker.is_file():
+        raise PresentonError("Presenton temporary ownership marker is missing")
+    try:
+        marker_content = marker.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise PresentonError("Could not read Presenton temporary ownership marker") from exc
+    if marker_content != TEMP_MARKER_CONTENT:
+        raise PresentonError("Presenton temporary ownership marker is invalid")
+    return resolved
+
+
+def command_create_temp(_: argparse.Namespace) -> int:
+    temp_dir = Path(tempfile.mkdtemp(prefix="presenton-")).resolve(strict=True)
+    (temp_dir / TEMP_MARKER_NAME).write_text(TEMP_MARKER_CONTENT, encoding="utf-8")
+    print_status(f"Created temporary workspace {temp_dir}")
+    print(temp_dir)
+    return 0
+
+
+def command_cleanup_temp(args: argparse.Namespace) -> int:
+    temp_dir = resolve_owned_temp_dir(args.path)
+    shutil.rmtree(temp_dir)
+    print_status(f"Cleaned temporary workspace {temp_dir}")
+    return 0
+
+
 def command_search(args: argparse.Namespace) -> int:
     print_status("Searching for matching presentation designs")
     results = request_json(
@@ -105,11 +154,17 @@ def command_search(args: argparse.Namespace) -> int:
 def command_export(args: argparse.Namespace) -> int:
     try:
         html_path = args.html.expanduser().resolve(strict=True)
-        temp_root = Path(tempfile.gettempdir()).resolve(strict=True)
-        html_path.relative_to(temp_root)
+        temp_root = get_temp_root()
+        relative_path = html_path.relative_to(temp_root)
+        if len(relative_path.parts) < 2 or not relative_path.parts[0].startswith(
+            "presenton-"
+        ):
+            raise ValueError
+        owned_temp_dir = temp_root / relative_path.parts[0]
+        resolve_owned_temp_dir(owned_temp_dir)
     except (OSError, ValueError) as exc:
         raise PresentonError(
-            "Presentation HTML must be an existing file inside the OS temporary directory"
+            "Presentation HTML must be inside a directory created by create-temp"
         ) from exc
 
     print_status(f"Reading temporary presentation HTML from {html_path}")
@@ -149,6 +204,17 @@ def command_export(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    create_temp = subparsers.add_parser(
+        "create-temp", help="Create a private Presenton temporary workspace"
+    )
+    create_temp.set_defaults(handler=command_create_temp)
+
+    cleanup_temp = subparsers.add_parser(
+        "cleanup-temp", help="Remove a Presenton temporary workspace"
+    )
+    cleanup_temp.add_argument("--path", type=Path, required=True)
+    cleanup_temp.set_defaults(handler=command_cleanup_temp)
 
     search = subparsers.add_parser("search-designs", help="Search Presenton visual designs")
     search.add_argument("--query", required=True)
