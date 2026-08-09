@@ -8,6 +8,54 @@ import re
 import sys
 from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import parse_qs, unquote_plus, urlsplit
+
+
+GENERIC_FONT_FAMILIES = {
+    "cursive",
+    "fantasy",
+    "fangsong",
+    "inherit",
+    "initial",
+    "math",
+    "monospace",
+    "revert",
+    "sans-serif",
+    "serif",
+    "system-ui",
+    "ui-monospace",
+    "ui-rounded",
+    "ui-sans-serif",
+    "ui-serif",
+    "unset",
+}
+LOCAL_SYSTEM_FONT_FAMILIES = {
+    "arial",
+    "arial black",
+    "calibri",
+    "cambria",
+    "candara",
+    "comic sans ms",
+    "consolas",
+    "courier",
+    "courier new",
+    "dejavu sans",
+    "dejavu serif",
+    "georgia",
+    "helvetica",
+    "impact",
+    "liberation mono",
+    "lucida console",
+    "menlo",
+    "monaco",
+    "segoe ui",
+    "sfmono-regular",
+    "tahoma",
+    "times",
+    "times new roman",
+    "trebuchet ms",
+    "verdana",
+}
 
 
 class PresentationParser(HTMLParser):
@@ -52,6 +100,84 @@ class PresentationParser(HTMLParser):
             and data.strip()
         ):
             self.direct_text = True
+
+
+class FontMarkupParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.arbitrary_families: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        classes = dict(attrs).get("class") or ""
+        for class_name in classes.split():
+            if class_name.startswith("font-[") and class_name.endswith("]"):
+                family = class_name[6:-1].strip("'\"").replace("_", " ")
+                if family:
+                    self.arbitrary_families.append(family)
+
+
+def split_font_stack(value: str) -> list[str]:
+    return [part.strip().strip("'\"") for part in value.split(",") if part.strip()]
+
+
+def normalize_font_name(name: str) -> str:
+    return re.sub(r"\s+", " ", name.strip()).casefold()
+
+
+def custom_font_names(values: list[str]) -> set[str]:
+    names: set[str] = set()
+    for value in values:
+        for family in split_font_stack(value):
+            normalized = normalize_font_name(family)
+            if (
+                normalized
+                and normalized not in GENERIC_FONT_FAMILIES
+                and normalized not in LOCAL_SYSTEM_FONT_FAMILIES
+                and not normalized.startswith(("var(", "--"))
+            ):
+                names.add(normalized)
+    return names
+
+
+def validate_font_loading(html: str) -> list[str]:
+    """Require custom fonts used in slide markup to be declared by head imports."""
+
+    head_match = re.search(r"<head\b[^>]*>(.*?)</head\s*>", html, re.IGNORECASE | re.DOTALL)
+    body_match = re.search(r"<body\b[^>]*>(.*?)</body\s*>", html, re.IGNORECASE | re.DOTALL)
+    if not head_match or not body_match:
+        return []
+
+    head = head_match.group(1)
+    body = body_match.group(1)
+    used_values = re.findall(r"font-family\s*:\s*([^;}\n]+)", body, re.IGNORECASE)
+    parser = FontMarkupParser()
+    parser.feed(body)
+    parser.close()
+    used_names = custom_font_names(used_values + parser.arbitrary_families)
+    if not used_names:
+        return []
+
+    imported_names: set[str] = set()
+    for encoded_family in re.findall(r"[?&]family=([^&#'\"\s)]+)", head, re.IGNORECASE):
+        imported_names.add(
+            normalize_font_name(unquote_plus(encoded_family).split(":", 1)[0].replace("+", " "))
+        )
+
+    # Support an inline @font-face declaration if a future format relaxes the
+    # no-style-block rule. A declaration is only valid when it has a remote or
+    # data source, so a bare font-family name is never treated as a load.
+    for block in re.findall(r"@font-face\s*\{(.*?)\}", head, re.IGNORECASE | re.DOTALL):
+        if re.search(r"\bsrc\s*:\s*[^;}]*(?:https://|data:)", block, re.IGNORECASE):
+            family_match = re.search(r"font-family\s*:\s*([^;}\n]+)", block, re.IGNORECASE)
+            if family_match:
+                imported_names.update(custom_font_names([family_match.group(1)]))
+
+    missing = sorted(name for name in used_names if name not in imported_names)
+    return [
+        "Custom font '{}' is used in slide markup but is not imported in <head>; "
+        "add a matching absolute HTTPS stylesheet link.".format(name)
+        for name in missing
+    ]
 
 
 def validate_html(html: str) -> list[str]:
@@ -100,6 +226,8 @@ def validate_html(html: str) -> list[str]:
     if local_sources:
         examples = ", ".join(local_sources[:3])
         errors.append(f"Use absolute HTTPS or data URLs instead of local/relative assets: {examples}")
+
+    errors.extend(validate_font_loading(html))
 
     return errors
 

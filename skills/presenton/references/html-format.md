@@ -48,6 +48,7 @@ Do not wrap slides in another container inside `#presentation-slides-wrapper`. A
 
 - Use complete inline SVG only for non-chart artwork and icons.
 - Use absolute HTTPS URLs or `data:` URLs for images and fonts. Local and relative filesystem paths are not reachable by the exporter.
+- When using a non-system font, add its matching absolute HTTPS stylesheet `<link>` in `<head>` before using the font in slide markup. A font-family name without a head import is invalid for this workflow. Generic/system fallback families do not need an import.
 - Include meaningful `alt` text on images.
 - Use common fallback fonts. Web fonts may be used, but the exporter can only preserve what loads before stabilization and what the target format supports.
 - Ensure every image has explicit dimensions and a deliberate `object-fit` value.
@@ -98,6 +99,7 @@ Apply that system consistently, but choose a content-appropriate layout per slid
 - 1280×720 dimensions present and applied to every slide
 - No overflow, clipping, accidental scrollbars, or off-canvas text
 - No relative/local asset URLs
+- Custom fonts used by slide markup are imported or linked from `<head>`
 - No inline `style` attributes or embedded `<style>` blocks
 - Chart.js CDN, unique fixed-size canvas IDs, and non-animated initialization present for every chart
 - Same final HTML used for PPTX, PDF, and PNG exports

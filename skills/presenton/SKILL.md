@@ -13,6 +13,7 @@ Use Presenton's design search and HTML exporter instead of constructing the bina
 - Read [references/html-format.md](references/html-format.md) before writing or revising HTML.
 - Call the public endpoints at `https://api.presenton.ai`; no API key or authorization header is required.
 - Continuously print concise status updates while working. Report design search, selected design, HTML generation, validation, export submission, API wait, and URL receipt; provide periodic heartbeat updates during long waits.
+- If a non-system font is used by the presentation HTML, load it from an absolute HTTPS stylesheet in `<head>` before using it. Do not rely on a font name alone; the final HTML must contain the matching font import/link.
 - Never save PPTX, PDF, PNG, ZIP, or generated HTML files in the workspace, repository, home directory, or another persistent location. Store only intermediate HTML in a private OS temporary directory created by the helper, and always remove that exact directory in a finalization step.
 
 ## Creation workflow
@@ -30,6 +31,8 @@ Use Presenton's design search and HTML exporter instead of constructing the bina
    python3 scripts/validate_html.py "$presenton_temp_dir/presentation.html"
    ```
 
+   The validator also checks that custom fonts used by slide markup have a matching import in the document head.
+
 9. Export each requested format separately. The endpoint accepts only one `format` per call:
 
    ```bash
@@ -43,7 +46,15 @@ Use Presenton's design search and HTML exporter instead of constructing the bina
 
 10. Capture the HTTP or HTTPS URL printed by the helper and return it as a clickable link. Do not download or save the exported file locally.
 11. For multiple requested formats, call export separately and return one labeled URL per format.
-12. In a `finally`-equivalent step that runs after success, exhausted retries, errors, or interruption, clean up the exact temporary directory:
+12. After all requested exports succeed, list the fonts from the exact final HTML before cleanup:
+
+    ```bash
+    python3 scripts/presenton_artifacts.py list-fonts \
+      --html "$presenton_temp_dir/presentation.html"
+    ```
+
+    Include the resulting font names in the final response, along with any web-font source URLs when present. State that the inventory applies to every requested PPTX, PDF, and PNG export from that HTML.
+13. In a `finally`-equivalent step that runs after success, exhausted retries, errors, or interruption, clean up the exact temporary directory:
 
    ```bash
    python3 scripts/presenton_artifacts.py cleanup-temp \
@@ -68,6 +79,7 @@ If the helper cannot be used, follow the equivalent cURL contracts in [reference
 - Vary layouts to fit the content while preserving a coherent system.
 - Keep text readable at presentation distance and prevent all overflow.
 - Use Tailwind classes for layout, typography, color, spacing, sizing, borders, and effects. Keep text as HTML text for PPTX editability.
+- Choose and import custom fonts in the document head before applying them to slide markup. Keep generic/system fallback families only as fallbacks.
 - Use Chart.js for charts. Chart canvases may be rasterized in PPTX output; use them only for actual data visualizations.
 - Add one `data-speaker-note` attribute per slide only when notes are requested.
 - Export from the same final HTML for every requested format so the outputs match.

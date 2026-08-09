@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -13,9 +14,11 @@ import urllib.error
 import urllib.request
 from collections.abc import Iterator
 from contextlib import contextmanager
+from html import unescape
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, unquote_plus, urlparse, urlsplit
 
 from validate_html import validate_html
 
@@ -26,9 +29,133 @@ EXPORT_TIMEOUT_SECONDS = 300.0
 TEMP_MARKER_NAME = ".presenton-temp"
 TEMP_MARKER_CONTENT = "presenton-owned\n"
 
+GENERIC_FONT_FAMILIES = {
+    "cursive",
+    "fantasy",
+    "fangsong",
+    "inherit",
+    "initial",
+    "math",
+    "monospace",
+    "revert",
+    "sans-serif",
+    "serif",
+    "system-ui",
+    "ui-monospace",
+    "ui-rounded",
+    "ui-sans-serif",
+    "ui-serif",
+    "unset",
+}
+TAILWIND_FONT_STACKS = {
+    "font-sans": "ui-sans-serif, system-ui, sans-serif",
+    "font-serif": "ui-serif, Georgia, Cambria, Times New Roman, Times, serif",
+    "font-mono": (
+        "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "
+        "Liberation Mono, Courier New, monospace"
+    ),
+}
+
 
 class PresentonError(RuntimeError):
     pass
+
+
+class FontUsageParser(HTMLParser):
+    """Collect font utilities, inline declarations, and web-font stylesheets."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.tailwind_fonts: list[tuple[str, str]] = []
+        self.web_font_urls: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        classes = (attributes.get("class") or "").split()
+        for class_name in classes:
+            if class_name in TAILWIND_FONT_STACKS:
+                self.tailwind_fonts.append((class_name, TAILWIND_FONT_STACKS[class_name]))
+            elif class_name.startswith("font-[") and class_name.endswith("]"):
+                family = class_name[6:-1].strip("'\"").replace("_", " ")
+                if family:
+                    self.tailwind_fonts.append(("arbitrary font utility", family))
+
+        href = attributes.get("href") or attributes.get("src")
+        if href:
+            parsed = urlsplit(unescape(href))
+            if parsed.scheme == "https" and "family" in parse_qs(parsed.query):
+                self.web_font_urls.append(unescape(href))
+
+
+def split_font_stack(value: str) -> list[str]:
+    """Split a CSS font-family value while preserving quoted family names."""
+
+    parts = re.split(r",\s*(?![^()]*\))", value)
+    return [part.strip().strip("'\"") for part in parts if part.strip()]
+
+
+def is_installable_font_name(name: str) -> bool:
+    normalized = re.sub(r"\s+", " ", name.strip()).lower()
+    return bool(normalized) and normalized not in GENERIC_FONT_FAMILIES and not normalized.startswith(
+        ("var(", "--")
+    )
+
+
+def collect_font_usage(html: str) -> list[tuple[str, list[str]]]:
+    """Return ordered font names/stacks and the places that declare them."""
+
+    records: dict[str, tuple[str, list[str]]] = {}
+
+    def add(name: str, source: str) -> None:
+        clean_name = re.sub(r"\s+", " ", unescape(name).strip())
+        if not is_installable_font_name(clean_name):
+            return
+        key = clean_name.casefold()
+        if key not in records:
+            records[key] = (clean_name, [])
+        if source not in records[key][1]:
+            records[key][1].append(source)
+
+    parser = FontUsageParser()
+    parser.feed(html)
+    parser.close()
+
+    for match in re.finditer(r"font-family\s*:\s*([^;}\n]+)", html, re.IGNORECASE):
+        stack = re.sub(r"\s+", " ", match.group(1).strip())
+        for family in split_font_stack(stack):
+            add(family, f"CSS font-family stack: {stack}")
+
+    # Arbitrary Tailwind font-family utilities are explicit enough to be useful
+    # even when Tailwind's generated CSS is not present in the source HTML.
+    for utility, value in parser.tailwind_fonts:
+        if utility == "arbitrary font utility":
+            add(value, f"Tailwind {utility}: font-[{value}]")
+        else:
+            add(f"{utility} stack", f"Tailwind {utility}: {value}")
+
+    web_font_urls = list(parser.web_font_urls)
+    web_font_urls.extend(re.findall(r"https://[^\s\"')>]+", html, re.IGNORECASE))
+    for source_url in dict.fromkeys(web_font_urls):
+        parsed_url = urlsplit(source_url)
+        query = parse_qs(parsed_url.query)
+        for encoded_family in query.get("family", []):
+            family_spec = unquote_plus(encoded_family)
+            family_name = family_spec.split(":", 1)[0].replace("+", " ").strip()
+            add(family_name, f"Web font stylesheet ({parsed_url.netloc}): {source_url}")
+
+    return list(records.values())
+
+
+def print_font_usage(html: str) -> None:
+    records = collect_font_usage(html)
+    print("Fonts used by the final HTML:")
+    if not records:
+        print("- No explicit installable font family was found; browser/exporter defaults may apply.")
+        return
+    for name, sources in records:
+        print(f"- {name}")
+        for source in sources:
+            print(f"  Source: {source}")
 
 
 def print_status(message: str) -> None:
@@ -201,6 +328,24 @@ def command_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_list_fonts(args: argparse.Namespace) -> int:
+    try:
+        html_path = args.html.expanduser().resolve(strict=True)
+        temp_root = get_temp_root()
+        relative_path = html_path.relative_to(temp_root)
+        if len(relative_path.parts) < 2 or not relative_path.parts[0].startswith("presenton-"):
+            raise ValueError
+        owned_temp_dir = temp_root / relative_path.parts[0]
+        resolve_owned_temp_dir(owned_temp_dir)
+        html = html_path.read_text(encoding="utf-8")
+    except (OSError, ValueError) as exc:
+        raise PresentonError(
+            "Presentation HTML must be inside a directory created by create-temp"
+        ) from exc
+    print_font_usage(html)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -225,6 +370,12 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--format", choices=("pptx", "pdf", "png"), required=True)
     export.add_argument("--title")
     export.set_defaults(handler=command_export)
+
+    list_fonts = subparsers.add_parser(
+        "list-fonts", help="List fonts declared by a presentation HTML file"
+    )
+    list_fonts.add_argument("--html", type=Path, required=True)
+    list_fonts.set_defaults(handler=command_list_fonts)
 
     return parser
 
