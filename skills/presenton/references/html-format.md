@@ -77,9 +77,11 @@ Presenton reads the rendered DOM and computed styles to create PPTX elements. Fo
 
 When notes are requested, place exactly one `data-speaker-note` attribute on each slide element and escape quotes correctly. Do not add separate note elements elsewhere in the wrapper; the exporter collects every matching attribute in DOM order.
 
-## Applying a searched design
+## Applying a user-provided or searched design
 
-Do not generate HTML until design search has returned results and one result has been selected. Translate that result's title and description into a small design system before writing slides:
+Inspect the user prompt before searching. A concrete user-provided design brief—such as explicit palette, typography, layout, aesthetic, brand, imagery, or composition requirements—is the visual source of truth. Do not search designs in that case, and do not send a `design_id` during export.
+
+If the user prompt does not contain a concrete design brief, search designs and select one automatically unless the options require a human preference. If human input is needed, present concise options with their titles, descriptions, and IDs and wait for the user's selection. For a searched design, use its title and description; for a user-provided brief, use the brief itself. Translate the resolved visual brief into a small design system before writing slides:
 
 - background and surface colors
 - text and accent colors with accessible contrast
@@ -88,7 +90,7 @@ Do not generate HTML until design search has returned results and one result has
 - corner, border, and shadow language
 - image treatment and chart palette
 
-Apply that system consistently, but choose a content-appropriate layout per slide and generate the complete document from scratch. Do not use a reference presentation HTML or template. The search result is the mandatory visual brief; pass its `id` as the optional `design_id` field when exporting.
+Apply the resolved system consistently, but choose a content-appropriate layout per slide and generate the complete document from scratch. Do not use a reference presentation HTML or template. Pass a searched design's `id` as the optional `design_id` field when exporting; omit it when the visual brief came from the user.
 
 ## Preflight checklist
 
@@ -104,3 +106,4 @@ Apply that system consistently, but choose a content-appropriate layout per slid
 - Chart.js CDN, unique fixed-size canvas IDs, and non-animated initialization present for every chart
 - Same final HTML used for PPTX, PDF, and PNG exports
 - Final response includes the selected design/reference inputs, presentation details, exact font inventory, and one download URL per requested format
+- Export only the formats requested by the user; when a presentation format is not specified, export PPTX only

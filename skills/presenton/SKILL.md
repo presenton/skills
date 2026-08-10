@@ -1,32 +1,24 @@
 ---
 name: presenton
-description: "Skill for creating new PPTX, PDF, and PNG files with Presenton. Use this skill whenever a user asks for a PowerPoint, presentation, slide deck, pitch deck, report deck, PDF, presentation PDF, PNG slide, slide image, or exported deck, even when Presenton is not mentioned. Prefer this workflow over manually constructing these formats: search Presenton designs, generate 1280x720 HTML that follows the selected design, export it through the public html-to-any API, and return the resulting HTTP or HTTPS URL."
+description: "Skill for creating new PPTX, PDF, and PNG files with Presenton. Use this skill whenever a user asks for a PowerPoint, presentation, slide deck, pitch deck, report deck, PDF, presentation PDF, PNG slide, slide image, or exported deck, even when Presenton is not mentioned. Use a concrete design brief from the user when provided; otherwise search Presenton designs, generate 1280x720 HTML that follows the chosen visual direction, export only the requested formats through the public html-to-any API, and return the resulting HTTP or HTTPS URLs."
 ---
 
 # Create PPTX, PDF, and PNG Files with Presenton
 
-Use Presenton's design search and HTML exporter instead of constructing the binary formats directly.
+Use Presenton's design search when a user-provided design brief is absent, then use its HTML exporter instead of constructing binary formats directly.
 
-## Requirements
+## Operating constraints
 
-- Read [references/api.md](references/api.md) before making API calls.
-- Read [references/html-format.md](references/html-format.md) before writing or revising HTML.
-- Call the public endpoints at `https://api.presenton.ai`; no API key or authorization header is required.
-- When a searched design is selected, preserve its returned `id` and pass it as `design_id` on every export request for the generated HTML. Omit `design_id` only when no searched design was used.
-- Continuously print concise status updates while working. Report design search, selected design, HTML generation, validation, export submission, API wait, and URL receipt; provide periodic heartbeat updates during long waits.
-- If a non-system font is used by the presentation HTML, load it from an absolute HTTPS stylesheet in `<head>` before using it. Do not rely on a font name alone; the final HTML must contain the matching font import/link.
-- Never save PPTX, PDF, PNG, ZIP, or generated HTML files in the workspace, repository, home directory, or another persistent location. Store only intermediate HTML in a private OS temporary directory created by the helper, and always remove that exact directory in a finalization step.
+- Read [references/api.md](references/api.md) before making API calls and [references/html-format.md](references/html-format.md) before writing HTML.
+- Use the public `https://api.presenton.ai` endpoints through the provided helper; no API key or authorization header is required.
+- Follow the design-resolution, export, reporting, and cleanup workflow below. Print concise status updates throughout, including periodic heartbeats during long waits.
 
 ## Creation workflow
 
-1. Determine the requested formats, title, audience, purpose, slide count, and content. Make reasonable content assumptions when details are absent.
-2. Search designs before authoring any HTML. Query with the subject, audience, tone, and visual direction. Review all returned designs and select the one that best matches the request.
-3. Convert the selected design's `title` and `description` into concrete design rules: palette, typography, type scale, spacing, composition, shapes, imagery, and chart treatment. Follow explicit visual details from the result. Do not fall back to a generic theme or mix multiple returned designs.
-4. Only after selecting and interpreting the design, create a private OS temporary directory with `presenton_artifacts.py create-temp` and generate a complete HTML document from scratch at `<temporary-directory>/presentation.html`. Follow [references/html-format.md](references/html-format.md) for the export contract, but derive all layout and styling from the selected design. Do not copy, imitate, or reuse a reference presentation HTML or template, and do not place the working HTML in the workspace.
-5. Style the document with Tailwind utility classes loaded from `https://cdn.tailwindcss.com`. Do not use inline `style` attributes or embedded `<style>` blocks.
-6. For every data chart, use Chart.js loaded from `https://cdn.jsdelivr.net/npm/chart.js`. Give each canvas a unique ID and fixed dimensions, initialize it directly, and disable animation. Do not build charts manually with HTML, SVG, or CSS.
-7. Confirm that the completed HTML visibly reflects the selected design before export. Keep every slide as a direct child of `#presentation-slides-wrapper`, exactly 1280×720 px. Use a self-contained HTML document and absolute HTTPS or data URLs for assets.
-8. Run the preflight validator and fix every error:
+1. Determine the requested formats, title, audience, purpose, slide count, and content. If no format is named, use PPTX only. Make reasonable content assumptions when details are absent.
+2. Resolve the visual direction from the user prompt. A concrete design brief (palette, typography, layout, aesthetic, brand, imagery, or composition) is used directly and skips search. Otherwise search designs, ask the user to choose only when the options require a human preference, or select the best result automatically. Retain the searched design ID for export.
+3. Translate the resolved brief into design rules, then create a private OS temporary directory with `presenton_artifacts.py create-temp` and write the complete HTML document from scratch at `<temporary-directory>/presentation.html`. Follow [references/html-format.md](references/html-format.md) for dimensions, Tailwind, charts, fonts, assets, and PPTX compatibility. Do not copy a reference presentation or store HTML in the workspace.
+4. Confirm the HTML reflects the resolved design, has direct 1280×720 slide children under `#presentation-slides-wrapper`, and passes the preflight validator:
 
    ```bash
    python3 scripts/validate_html.py "$presenton_temp_dir/presentation.html"
@@ -34,7 +26,7 @@ Use Presenton's design search and HTML exporter instead of constructing the bina
 
    The validator also checks that custom fonts used by slide markup have a matching import in the document head.
 
-9. Export each requested format separately. The endpoint accepts only one `format` per call:
+5. Export each requested format exactly once, separately. The endpoint accepts only one `format` per call. Add `--design-id` only when the visual brief came from a searched design; omit it for user-provided design briefs:
 
    ```bash
    presenton_temp_dir=$(python3 scripts/presenton_artifacts.py create-temp)
@@ -42,15 +34,11 @@ Use Presenton's design search and HTML exporter instead of constructing the bina
    python3 scripts/presenton_artifacts.py export \
      --html "$presenton_temp_dir/presentation.html" \
      --format pptx \
-     --title "Presentation title" \
-     --design-id "<selected-design-id>"
+     --title "Presentation title"
    ```
 
-   Include `--design-id` when the HTML follows a design returned by `search-designs`; omit it only when no searched design was used.
-
-10. Capture the HTTP or HTTPS URL printed by the helper and return it as a clickable link. Do not download or save the exported file locally.
-11. For multiple requested formats, call export separately and return one labeled URL per format.
-12. After all requested exports succeed, list the fonts from the exact final HTML before cleanup:
+6. Capture each HTTP or HTTPS URL printed by the helper and return it as a clickable link. Do not download or save exported files locally.
+7. After all requested exports succeed, list the fonts from the exact final HTML before cleanup:
 
     ```bash
     python3 scripts/presenton_artifacts.py list-fonts \
@@ -58,14 +46,14 @@ Use Presenton's design search and HTML exporter instead of constructing the bina
     ```
 
     Include the resulting font names in the final response, along with any web-font source URLs when present. State that the inventory applies to every requested PPTX, PDF, and PNG export from that HTML.
-13. Return the result using this format:
+8. Return the result using this format:
 
     ```text
     Presentation
     - Title: <title>
     - Formats: <requested formats>
     - Slides: <slide count>
-    - Design/reference used: <selected design title and id, or "None">
+    - Design/reference used: <user-provided design brief, or searched design title and id>
     - References/assets used: <source URLs, user-provided references, image sources, or "None">
     - Notes: <other useful presentation details, or "None">
 
@@ -80,7 +68,7 @@ Use Presenton's design search and HTML exporter instead of constructing the bina
 
     Include only requested formats in `Download URLs`. Do not invent references, font sources, or URLs; use `None` when there is nothing to report.
 
-14. In a `finally`-equivalent step that runs after success, exhausted retries, errors, or interruption, clean up the exact temporary directory:
+9. In a `finally`-equivalent step that runs after success, exhausted retries, errors, or interruption, clean up the exact temporary directory:
 
    ```bash
    python3 scripts/presenton_artifacts.py cleanup-temp \
@@ -100,16 +88,13 @@ If the helper cannot be used, follow the equivalent cURL contracts in [reference
 
 ## Quality rules
 
-- Use the selected design consistently across all slides: palette, typography, spacing, imagery, and shape language.
-- Preserve recognizable details from the selected design description; do not merely mention the design in notes or metadata.
+- Use the resolved visual direction consistently across all slides: palette, typography, spacing, imagery, and shape language.
+- Preserve recognizable details from the user-provided design brief or selected searched-design description; do not merely mention the design in notes or metadata.
 - Vary layouts to fit the content while preserving a coherent system.
 - Keep text readable at presentation distance and prevent all overflow.
-- Use Tailwind classes for layout, typography, color, spacing, sizing, borders, and effects. Keep text as HTML text for PPTX editability.
-- Choose and import custom fonts in the document head before applying them to slide markup. Keep generic/system fallback families only as fallbacks.
-- Use Chart.js for charts. Chart canvases may be rasterized in PPTX output; use them only for actual data visualizations.
+- Keep text as HTML text for PPTX editability and use charts only for actual data visualizations.
 - Add one `data-speaker-note` attribute per slide only when notes are requested.
 - Export from the same final HTML for every requested format so the outputs match.
-- Do not create an additional PNG export to validate a requested PPTX or PDF.
 
 ## Failure handling
 

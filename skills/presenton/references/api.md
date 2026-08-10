@@ -36,7 +36,7 @@ Response:
 ]
 ```
 
-Use one result's `title` and `description` as the visual brief for HTML generation. Preserve the selected result's `id` and include it as `design_id` in every export request for that HTML.
+Use one result's `title` and `description` as the visual brief for HTML generation. Preserve the selected result's `id` and include it as `design_id` in every export request for HTML based on that searched design. If the user supplied the design brief directly, do not search and omit `design_id`.
 
 cURL:
 
@@ -78,7 +78,7 @@ Response:
 }
 ```
 
-Call the endpoint once for each requested format. Return the response URL directly to the user as a clickable link. Do not download or save the exported file locally. The returned URL is presigned for 24 hours.
+Call the endpoint once for each requested format and never for an unrequested format. If a presentation was requested without a format, use `pptx` only. Return each response URL directly to the user as a clickable link. Do not download or save the exported file locally. The returned URL is presigned for 24 hours.
 
 Format behavior:
 
