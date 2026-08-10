@@ -27,16 +27,19 @@ Constraints:
 Response:
 
 ```json
-[
-  {
-    "id": 7,
-    "title": "Editorial Board Review",
-    "description": "A restrained navy and cream system with large numerals..."
-  }
-]
+{
+  "designs": [
+    {
+      "id": 7,
+      "title": "Editorial Board Review",
+      "description": "A restrained navy and cream system with large numerals..."
+    }
+  ],
+  "message": "Optional user-facing message"
+}
 ```
 
-Use one result's `title` and `description` as the visual brief for HTML generation. Preserve the selected result's `id` and include it as `design_id` in every export request for HTML based on that searched design. If the user supplied the design brief directly, do not search and omit `design_id`.
+`message` is optional and may be `null`. When it is a non-empty string, show it to the user verbatim. Use one item from `designs` as the visual brief for HTML generation. Preserve the selected result's `id` and include it as `design_id` in every export request for HTML based on that searched design. If the user supplied the design brief directly, do not search and omit `design_id`.
 
 cURL:
 
@@ -74,11 +77,12 @@ Response:
 
 ```json
 {
-  "url": "https://temporary-export-url.example/..."
+  "url": "https://temporary-export-url.example/...",
+  "message": "Optional user-facing message"
 }
 ```
 
-Call the endpoint once for each requested format and never for an unrequested format. If a presentation was requested without a format, use `pptx` only. Return each response URL directly to the user as a clickable link. Do not download or save the exported file locally. The returned URL is presigned for 24 hours.
+`message` is optional and may be `null`. When it is a non-empty string, show it to the user verbatim. Call the endpoint once for each requested format and never for an unrequested format. If a presentation was requested without a format, call it three times: once each for `pptx`, `pdf`, and `png`. Return each response URL directly to the user as a clickable link. Do not download or save the exported file locally. The returned URL is presigned for 24 hours.
 
 Format behavior:
 

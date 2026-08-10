@@ -1,6 +1,6 @@
 ---
 name: presenton
-description: "Skill for creating new PPTX, PDF, and PNG files with Presenton. Use this skill whenever a user asks for a PowerPoint, presentation, slide deck, pitch deck, report deck, PDF, presentation PDF, PNG slide, slide image, or exported deck, even when Presenton is not mentioned. Use a concrete design brief from the user when provided; otherwise search Presenton designs, generate 1280x720 HTML that follows the chosen visual direction, export only the requested formats through the public html-to-any API, and return the resulting HTTP or HTTPS URLs."
+description: "Skill for creating new PPTX, PDF, and PNG files with Presenton. Use this skill whenever a user asks for a PowerPoint, presentation, slide deck, pitch deck, report deck, PDF, presentation PDF, PNG slide, slide image, or exported deck, even when Presenton is not mentioned. Use a concrete design brief from the user when provided; otherwise search Presenton designs, generate 1280x720 HTML that follows the chosen visual direction, export requested formats—or all three formats when none is specified—through the public html-to-any API, and return the resulting HTTP or HTTPS URLs."
 ---
 
 # Create PPTX, PDF, and PNG Files with Presenton
@@ -12,10 +12,11 @@ Use Presenton's design search when a user-provided design brief is absent, then 
 - Read [references/api.md](references/api.md) before making API calls and [references/html-format.md](references/html-format.md) before writing HTML.
 - Use the public `https://api.presenton.ai` endpoints through the provided helper; no API key or authorization header is required.
 - Follow the design-resolution, export, reporting, and cleanup workflow below. Print concise status updates throughout, including periodic heartbeats during long waits.
+- Treat every non-empty `message` in a successful design-search or export response as user-facing. Relay it verbatim in the next commentary update and include it in the final response's `Notes`.
 
 ## Creation workflow
 
-1. Determine the requested formats, title, audience, purpose, slide count, and content. If no format is named, use PPTX only. Make reasonable content assumptions when details are absent.
+1. Determine the requested formats, title, audience, purpose, slide count, and content. If no format is named, export PPTX, PDF, and PNG. Make reasonable content assumptions when details are absent.
 2. Resolve the visual direction from the user prompt. A concrete design brief (palette, typography, layout, aesthetic, brand, imagery, or composition) is used directly and skips search. Otherwise search designs, ask the user to choose only when the options require a human preference, or select the best result automatically. Retain the searched design ID for export.
 3. Translate the resolved brief into design rules, then create a private OS temporary directory with `presenton_artifacts.py create-temp` and write the complete HTML document from scratch at `<temporary-directory>/presentation.html`. Follow [references/html-format.md](references/html-format.md) for dimensions, Tailwind, charts, fonts, assets, and PPTX compatibility. Do not copy a reference presentation or store HTML in the workspace.
 4. Confirm the HTML reflects the resolved design, has direct 1280×720 slide children under `#presentation-slides-wrapper`, and passes the preflight validator:
@@ -37,7 +38,7 @@ Use Presenton's design search when a user-provided design brief is absent, then 
      --title "Presentation title"
    ```
 
-6. Capture each HTTP or HTTPS URL printed by the helper and return it as a clickable link. Do not download or save exported files locally.
+6. Capture each HTTP or HTTPS URL printed by the helper and return it as a clickable link. The helper writes any response `message` to stderr as `API message: ...`; retain every such message for user reporting. Do not download or save exported files locally.
 7. After all requested exports succeed, list the fonts from the exact final HTML before cleanup:
 
     ```bash
@@ -51,11 +52,11 @@ Use Presenton's design search when a user-provided design brief is absent, then 
     ```text
     Presentation
     - Title: <title>
-    - Formats: <requested formats>
+    - Formats: <requested formats, or PPTX, PDF, and PNG when none was specified>
     - Slides: <slide count>
     - Design/reference used: <user-provided design brief, or searched design title and id>
     - References/assets used: <source URLs, user-provided references, image sources, or "None">
-    - Notes: <other useful presentation details, or "None">
+    - Notes: <every API response message verbatim, followed by other useful details; or "None">
 
     Fonts
     - <font name> — <source URL when applicable>
@@ -66,7 +67,7 @@ Use Presenton's design search when a user-provided design brief is absent, then 
     - PNG: [Download](<url>)
     ```
 
-    Include only requested formats in `Download URLs`. Do not invent references, font sources, or URLs; use `None` when there is nothing to report.
+    Include only requested formats in `Download URLs`; when no format was specified, include PPTX, PDF, and PNG. Do not invent references, font sources, or URLs; use `None` when there is nothing to report.
 
 9. In a `finally`-equivalent step that runs after success, exhausted retries, errors, or interruption, clean up the exact temporary directory:
 

@@ -106,4 +106,4 @@ Apply the resolved system consistently, but choose a content-appropriate layout 
 - Chart.js CDN, unique fixed-size canvas IDs, and non-animated initialization present for every chart
 - Same final HTML used for PPTX, PDF, and PNG exports
 - Final response includes the selected design/reference inputs, presentation details, exact font inventory, and one download URL per requested format
-- Export only the formats requested by the user; when a presentation format is not specified, export PPTX only
+- Export only the formats requested by the user; when no format is specified, export PPTX, PDF, and PNG

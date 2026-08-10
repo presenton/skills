@@ -162,6 +162,14 @@ def print_status(message: str) -> None:
     print(f"[presenton] {message}", file=sys.stderr, flush=True)
 
 
+def print_response_message(response: Any) -> None:
+    """Expose optional user-facing messages without changing stdout contracts."""
+
+    message = response.get("message") if isinstance(response, dict) else None
+    if isinstance(message, str) and message:
+        print_status(f"API message: {message}")
+
+
 @contextmanager
 def status_heartbeat(message: str, interval_seconds: float = 10.0) -> Iterator[None]:
     print_status(message)
@@ -264,11 +272,13 @@ def command_cleanup_temp(args: argparse.Namespace) -> int:
 
 def command_search(args: argparse.Namespace) -> int:
     print_status("Searching for matching presentation designs")
-    results = request_json(
+    response = request_json(
         "/api/v3/designs/search",
         {"query": args.query, "n": 4},
         timeout=SEARCH_TIMEOUT_SECONDS,
     )
+    print_response_message(response)
+    results = response.get("designs") if isinstance(response, dict) else None
     if not isinstance(results, list):
         raise PresentonError("Design search returned an unexpected response")
     print_status(f"Found {len(results)} design option(s)")
@@ -317,6 +327,7 @@ def command_export(args: argparse.Namespace) -> int:
         payload,
         timeout=EXPORT_TIMEOUT_SECONDS,
     )
+    print_response_message(response)
     url = response.get("url") if isinstance(response, dict) else None
     parsed_url = urlparse(url) if isinstance(url, str) else None
     if (
