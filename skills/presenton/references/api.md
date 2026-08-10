@@ -36,7 +36,7 @@ Response:
 ]
 ```
 
-Use one result's `title` and `description` as the visual brief for HTML generation. The `id` is informational and is not included in the export request.
+Use one result's `title` and `description` as the visual brief for HTML generation. Preserve the selected result's `id` and include it as `design_id` in every export request for that HTML.
 
 cURL:
 
@@ -58,7 +58,8 @@ Request:
 {
   "html": "<!doctype html><html>...</html>",
   "format": "pptx",
-  "title": "Quarterly review"
+  "title": "Quarterly review",
+  "design_id": 7
 }
 ```
 
@@ -67,6 +68,7 @@ Fields:
 - `html`: required non-empty string
 - `format`: exactly one of `pptx`, `pdf`, or `png`
 - `title`: optional string used for the exported presentation/file name
+- `design_id`: optional integer ID of the selected result from design search; include it when a searched design was used
 
 Response:
 
@@ -93,6 +95,8 @@ curl --fail-with-body --silent --show-error \
   --header 'Content-Type: application/json' \
   --data @request.json
 ```
+
+If no searched design was used, omit `design_id` from the request.
 
 ## Errors
 

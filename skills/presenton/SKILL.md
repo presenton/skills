@@ -12,6 +12,7 @@ Use Presenton's design search and HTML exporter instead of constructing the bina
 - Read [references/api.md](references/api.md) before making API calls.
 - Read [references/html-format.md](references/html-format.md) before writing or revising HTML.
 - Call the public endpoints at `https://api.presenton.ai`; no API key or authorization header is required.
+- When a searched design is selected, preserve its returned `id` and pass it as `design_id` on every export request for the generated HTML. Omit `design_id` only when no searched design was used.
 - Continuously print concise status updates while working. Report design search, selected design, HTML generation, validation, export submission, API wait, and URL receipt; provide periodic heartbeat updates during long waits.
 - If a non-system font is used by the presentation HTML, load it from an absolute HTTPS stylesheet in `<head>` before using it. Do not rely on a font name alone; the final HTML must contain the matching font import/link.
 - Never save PPTX, PDF, PNG, ZIP, or generated HTML files in the workspace, repository, home directory, or another persistent location. Store only intermediate HTML in a private OS temporary directory created by the helper, and always remove that exact directory in a finalization step.
@@ -41,8 +42,11 @@ Use Presenton's design search and HTML exporter instead of constructing the bina
    python3 scripts/presenton_artifacts.py export \
      --html "$presenton_temp_dir/presentation.html" \
      --format pptx \
-     --title "Presentation title"
+     --title "Presentation title" \
+     --design-id "<selected-design-id>"
    ```
+
+   Include `--design-id` when the HTML follows a design returned by `search-designs`; omit it only when no searched design was used.
 
 10. Capture the HTTP or HTTPS URL printed by the helper and return it as a clickable link. Do not download or save the exported file locally.
 11. For multiple requested formats, call export separately and return one labeled URL per format.
@@ -54,7 +58,29 @@ Use Presenton's design search and HTML exporter instead of constructing the bina
     ```
 
     Include the resulting font names in the final response, along with any web-font source URLs when present. State that the inventory applies to every requested PPTX, PDF, and PNG export from that HTML.
-13. In a `finally`-equivalent step that runs after success, exhausted retries, errors, or interruption, clean up the exact temporary directory:
+13. Return the result using this format:
+
+    ```text
+    Presentation
+    - Title: <title>
+    - Formats: <requested formats>
+    - Slides: <slide count>
+    - Design/reference used: <selected design title and id, or "None">
+    - References/assets used: <source URLs, user-provided references, image sources, or "None">
+    - Notes: <other useful presentation details, or "None">
+
+    Fonts
+    - <font name> — <source URL when applicable>
+
+    Download URLs
+    - PPTX: [Download](<url>)
+    - PDF: [Download](<url>)
+    - PNG: [Download](<url>)
+    ```
+
+    Include only requested formats in `Download URLs`. Do not invent references, font sources, or URLs; use `None` when there is nothing to report.
+
+14. In a `finally`-equivalent step that runs after success, exhausted retries, errors, or interruption, clean up the exact temporary directory:
 
    ```bash
    python3 scripts/presenton_artifacts.py cleanup-temp \

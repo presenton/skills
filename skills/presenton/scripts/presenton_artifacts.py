@@ -309,6 +309,8 @@ def command_export(args: argparse.Namespace) -> int:
     payload: dict[str, Any] = {"html": html, "format": args.format}
     if args.title:
         payload["title"] = args.title
+    if args.design_id is not None:
+        payload["design_id"] = args.design_id
     print_status(f"Submitting {args.format.upper()} export")
     response = request_json(
         "/api/v3/export/html-to-any",
@@ -369,6 +371,11 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--html", type=Path, required=True)
     export.add_argument("--format", choices=("pptx", "pdf", "png"), required=True)
     export.add_argument("--title")
+    export.add_argument(
+        "--design-id",
+        type=int,
+        help="ID of the selected design returned by search-designs",
+    )
     export.set_defaults(handler=command_export)
 
     list_fonts = subparsers.add_parser(

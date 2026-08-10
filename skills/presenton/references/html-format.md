@@ -88,7 +88,7 @@ Do not generate HTML until design search has returned results and one result has
 - corner, border, and shadow language
 - image treatment and chart palette
 
-Apply that system consistently, but choose a content-appropriate layout per slide and generate the complete document from scratch. Do not use a reference presentation HTML or template. The search result is the mandatory visual brief; no design ID or special markup is sent to html-to-any.
+Apply that system consistently, but choose a content-appropriate layout per slide and generate the complete document from scratch. Do not use a reference presentation HTML or template. The search result is the mandatory visual brief; pass its `id` as the optional `design_id` field when exporting.
 
 ## Preflight checklist
 
@@ -103,3 +103,4 @@ Apply that system consistently, but choose a content-appropriate layout per slid
 - No inline `style` attributes or embedded `<style>` blocks
 - Chart.js CDN, unique fixed-size canvas IDs, and non-animated initialization present for every chart
 - Same final HTML used for PPTX, PDF, and PNG exports
+- Final response includes the selected design/reference inputs, presentation details, exact font inventory, and one download URL per requested format
