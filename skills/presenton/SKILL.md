@@ -90,6 +90,7 @@ If the helper cannot be used, follow the equivalent cURL contracts in [reference
 ## Quality rules
 
 - Use the resolved visual direction consistently across all slides: palette, typography, spacing, imagery, and shape language.
+- When the resolved design names a font family, use that exact font family in the presentation; do not silently substitute another font.
 - Preserve recognizable details from the user-provided design brief or selected searched-design description; do not merely mention the design in notes or metadata.
 - Vary layouts to fit the content while preserving a coherent system.
 - Keep text readable at presentation distance and prevent all overflow.
