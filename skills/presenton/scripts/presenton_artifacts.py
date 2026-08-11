@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Search Presenton designs, export HTML, and return export URLs."""
+"""Prepare Presenton assets, export HTML, and return download and preview URLs."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import re
+import secrets
 import shutil
 import sys
 import tempfile
@@ -18,7 +19,7 @@ from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, unquote_plus, urlparse, urlsplit
+from urllib.parse import parse_qs, unquote_plus, urlencode, urlparse, urlsplit
 
 from validate_html import validate_html
 
@@ -26,8 +27,16 @@ from validate_html import validate_html
 DEFAULT_API_BASE = "https://api.presenton.ai"
 SEARCH_TIMEOUT_SECONDS = 60.0
 EXPORT_TIMEOUT_SECONDS = 300.0
+PUBLIC_IMAGE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
 TEMP_MARKER_NAME = ".presenton-temp"
 TEMP_MARKER_CONTENT = "presenton-owned\n"
+PUBLIC_IMAGE_CONTENT_TYPES = {
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+ICON_TYPES = ("bold", "duotone", "fill", "light", "regular", "thin")
 
 GENERIC_FONT_FAMILIES = {
     "cursive",
@@ -170,6 +179,17 @@ def print_response_message(response: Any) -> None:
         print_status(f"API message: {message}")
 
 
+def valid_web_url(value: Any) -> str | None:
+    """Return a valid HTTP(S) URL string, or None."""
+
+    if not isinstance(value, str):
+        return None
+    parsed_url = urlparse(value)
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+        return None
+    return value
+
+
 @contextmanager
 def status_heartbeat(message: str, interval_seconds: float = 10.0) -> Iterator[None]:
     print_status(message)
@@ -204,6 +224,16 @@ def request_json(
         headers=headers,
         method="POST",
     )
+    return send_json_request(request, endpoint, timeout)
+
+
+def send_json_request(
+    request: urllib.request.Request,
+    endpoint: str,
+    timeout: float,
+) -> Any:
+    """Send a prepared request and decode its JSON response consistently."""
+
     try:
         with status_heartbeat(f"Waiting for {endpoint}"):
             with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -214,7 +244,11 @@ def request_json(
         body = exc.read().decode("utf-8", errors="replace")
         try:
             error_payload = json.loads(body)
-            detail = error_payload.get("detail") or error_payload.get("error") or body
+            detail = (
+                error_payload.get("detail") or error_payload.get("error") or body
+                if isinstance(error_payload, dict)
+                else body
+            )
         except json.JSONDecodeError:
             detail = body
         raise PresentonError(f"Presenton API returned HTTP {exc.code}: {detail}") from exc
@@ -222,6 +256,58 @@ def request_json(
         raise PresentonError(f"Could not reach Presenton API: {exc.reason}") from exc
     except json.JSONDecodeError as exc:
         raise PresentonError("Presenton API returned invalid JSON") from exc
+
+
+def request_get_json(
+    endpoint: str,
+    params: dict[str, Any],
+    timeout: float = 60.0,
+) -> Any:
+    query = urlencode({key: value for key, value in params.items() if value is not None})
+    request = urllib.request.Request(
+        f"{DEFAULT_API_BASE}{endpoint}?{query}",
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "presenton-skill/1",
+        },
+        method="GET",
+    )
+    return send_json_request(request, endpoint, timeout)
+
+
+def request_public_image_upload(image_path: Path, timeout: float = 60.0) -> Any:
+    try:
+        resolved_path = image_path.expanduser().resolve(strict=True)
+        if not resolved_path.is_file():
+            raise PresentonError("Image path is not a file")
+        content_type = PUBLIC_IMAGE_CONTENT_TYPES.get(resolved_path.suffix.lower())
+        if content_type is None:
+            raise PresentonError("Image must be a PNG, JPEG, or WebP file")
+        if resolved_path.stat().st_size > PUBLIC_IMAGE_UPLOAD_MAX_BYTES:
+            raise PresentonError("Image exceeds the 10 MB public upload limit")
+        image_bytes = resolved_path.read_bytes()
+    except OSError as exc:
+        raise PresentonError(f"Could not read image file: {exc}") from exc
+
+    boundary = f"presenton-{secrets.token_hex(16)}"
+    filename = resolved_path.name.replace('"', "_").replace("\\", "_")
+    body = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+        f"Content-Type: {content_type}\r\n\r\n"
+    ).encode("utf-8") + image_bytes + f"\r\n--{boundary}--\r\n".encode("ascii")
+    endpoint = "/api/v3/images/upload/public"
+    request = urllib.request.Request(
+        f"{DEFAULT_API_BASE}{endpoint}",
+        data=body,
+        headers={
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Accept": "application/json",
+            "User-Agent": "presenton-skill/1",
+        },
+        method="POST",
+    )
+    return send_json_request(request, endpoint, timeout)
 
 
 def get_temp_root() -> Path:
@@ -288,6 +374,47 @@ def command_search(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_upload_image(args: argparse.Namespace) -> int:
+    print_status(f"Uploading presentation image {args.file}")
+    response = request_public_image_upload(args.file, timeout=SEARCH_TIMEOUT_SECONDS)
+    print_response_message(response)
+    image_url = valid_web_url(response.get("url")) if isinstance(response, dict) else None
+    if image_url is None:
+        raise PresentonError(
+            "Image upload response did not contain a valid HTTP or HTTPS URL"
+        )
+    print_status("Uploaded presentation image URL is ready")
+    print(image_url)
+    return 0
+
+
+def command_search_icons(args: argparse.Namespace) -> int:
+    query = args.query.strip()
+    if not query:
+        raise PresentonError("Icon search query must not be empty")
+    if args.limit <= 0:
+        raise PresentonError("Icon search limit must be a positive integer")
+    print_status(f"Searching presentation icons for {query!r}")
+    response = request_get_json(
+        "/api/v3/icons/search",
+        {
+            "query": query,
+            "limit": args.limit,
+            "icon_type": args.icon_type,
+        },
+        timeout=SEARCH_TIMEOUT_SECONDS,
+    )
+    if not isinstance(response, list):
+        raise PresentonError("Icon search returned an unexpected response")
+    icon_urls = [valid_web_url(value) for value in response]
+    if not icon_urls or any(value is None for value in icon_urls):
+        raise PresentonError("Icon search did not return valid HTTP or HTTPS URLs")
+    print_status(f"Found {len(icon_urls)} icon option(s)")
+    for icon_url in icon_urls:
+        print(icon_url)
+    return 0
+
+
 def command_export(args: argparse.Namespace) -> int:
     try:
         html_path = args.html.expanduser().resolve(strict=True)
@@ -328,16 +455,43 @@ def command_export(args: argparse.Namespace) -> int:
         timeout=EXPORT_TIMEOUT_SECONDS,
     )
     print_response_message(response)
-    url = response.get("url") if isinstance(response, dict) else None
-    parsed_url = urlparse(url) if isinstance(url, str) else None
-    if (
-        parsed_url is None
-        or parsed_url.scheme not in {"http", "https"}
-        or not parsed_url.netloc
-    ):
-        raise PresentonError("Export response did not contain a valid HTTP or HTTPS URL")
+    url = valid_web_url(response.get("url")) if isinstance(response, dict) else None
+    if url is None:
+        raise PresentonError(
+            "Export response did not contain a valid HTTP or HTTPS URL"
+        )
+    creation_id = response.get("id") if isinstance(response, dict) else None
+    if type(creation_id) is not int or creation_id <= 0:
+        raise PresentonError("Export response did not contain a valid creation id")
     print_status(f"{args.format.upper()} export URL is ready")
-    print(url)
+    if getattr(args, "json", False):
+        print(json.dumps({"id": creation_id, "url": url}))
+    else:
+        print(url)
+    return 0
+
+
+def command_create_preview(args: argparse.Namespace) -> int:
+    if type(args.id) is not int or args.id <= 0:
+        raise PresentonError("Preview creation id must be a positive integer")
+    print_status("Creating a shareable presentation preview")
+    response = request_json(
+        "/api/v3/export/html-to-any/create-preview",
+        {"id": args.id},
+        timeout=SEARCH_TIMEOUT_SECONDS,
+    )
+    print_response_message(response)
+    preview_url = (
+        valid_web_url(response.get("url"))
+        if isinstance(response, dict)
+        else None
+    )
+    if preview_url is None:
+        raise PresentonError(
+            "Preview response did not contain a valid HTTP or HTTPS URL"
+        )
+    print_status("Shareable presentation preview URL is ready")
+    print(preview_url)
     return 0
 
 
@@ -378,16 +532,43 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--query", required=True)
     search.set_defaults(handler=command_search)
 
+    upload_image = subparsers.add_parser(
+        "upload-image",
+        help="Upload a public image for use in presentation HTML",
+    )
+    upload_image.add_argument("--file", type=Path, required=True)
+    upload_image.set_defaults(handler=command_upload_image)
+
+    search_icons = subparsers.add_parser(
+        "search-icons", help="Search public icon URLs for presentation HTML"
+    )
+    search_icons.add_argument("--query", required=True)
+    search_icons.add_argument("--limit", type=int, default=5)
+    search_icons.add_argument("--icon-type", choices=ICON_TYPES, default="bold")
+    search_icons.set_defaults(handler=command_search_icons)
+
     export = subparsers.add_parser("export", help="Export compatible HTML")
     export.add_argument("--html", type=Path, required=True)
     export.add_argument("--format", choices=("pptx", "pdf", "png"), required=True)
     export.add_argument("--title")
+    export.add_argument(
+        "--json",
+        action="store_true",
+        help="Print a JSON object containing the export creation id and URL",
+    )
     export.add_argument(
         "--design-id",
         type=int,
         help="ID of the selected design returned by search-designs",
     )
     export.set_defaults(handler=command_export)
+
+    create_preview = subparsers.add_parser(
+        "create-preview",
+        help="Create a shareable preview URL from an export creation id",
+    )
+    create_preview.add_argument("--id", type=int, required=True)
+    create_preview.set_defaults(handler=command_create_preview)
 
     list_fonts = subparsers.add_parser(
         "list-fonts", help="List fonts declared by a presentation HTML file"

@@ -165,9 +165,9 @@ def validate_font_loading(html: str) -> list[str]:
 
     # Support an inline @font-face declaration if a future format relaxes the
     # no-style-block rule. A declaration is only valid when it has a remote or
-    # data source, so a bare font-family name is never treated as a load.
+    # HTTPS source, so a bare font-family name is never treated as a load.
     for block in re.findall(r"@font-face\s*\{(.*?)\}", head, re.IGNORECASE | re.DOTALL):
-        if re.search(r"\bsrc\s*:\s*[^;}]*(?:https://|data:)", block, re.IGNORECASE):
+        if re.search(r"\bsrc\s*:\s*[^;}]*https://", block, re.IGNORECASE):
             family_match = re.search(r"font-family\s*:\s*([^;}\n]+)", block, re.IGNORECASE)
             if family_match:
                 imported_names.update(custom_font_names([family_match.group(1)]))
@@ -195,6 +195,10 @@ def validate_html(html: str) -> list[str]:
         errors.append("Use Tailwind classes instead of embedded style blocks.")
     if "<canvas" in lowered and "https://cdn.jsdelivr.net/npm/chart.js" not in lowered:
         errors.append("Chart canvases require the Chart.js CDN script.")
+    if re.search(r"data:[a-z]+/[a-z0-9.+-]+(?:;[^,'\"\s]+)*,", html, re.I):
+        errors.append(
+            "Do not embed data/base64 URLs; upload images first and use absolute HTTPS URLs."
+        )
 
     parser = PresentationParser()
     try:
@@ -225,7 +229,7 @@ def validate_html(html: str) -> list[str]:
     )
     if local_sources:
         examples = ", ".join(local_sources[:3])
-        errors.append(f"Use absolute HTTPS or data URLs instead of local/relative assets: {examples}")
+        errors.append(f"Use absolute HTTPS URLs instead of local/relative assets: {examples}")
 
     errors.extend(validate_font_loading(html))
 

@@ -46,8 +46,10 @@ Do not wrap slides in another container inside `#presentation-slides-wrapper`. A
 
 ## Assets and fonts
 
-- Use complete inline SVG only for non-chart artwork and icons.
-- Use absolute HTTPS URLs or `data:` URLs for images and fonts. Local and relative filesystem paths are not reachable by the exporter.
+- Use complete inline SVG only for non-chart, non-icon artwork.
+- Use absolute HTTPS URLs for images, icons, and fonts. Never use `data:` URLs or base64 assets. Local and relative filesystem paths are not reachable by the exporter.
+- Before writing HTML, upload every user-provided image with `presenton_artifacts.py upload-image --file <image-path>` and use the returned HTTPS URL in an `<img>` element. Upload each file once and reuse its returned URL.
+- Search every icon with `presenton_artifacts.py search-icons --query <concept>`. Choose a returned HTTPS URL and use it in an `<img>` element. Do not substitute inline SVG, emoji, Unicode glyphs, icon fonts, or CSS-drawn shapes for icons.
 - If the resolved user-provided or searched design names a font family, use that exact family in the slide markup and import its matching font resource in `<head>`. Do not replace it merely because another font is easier to load. If the exact font has no exporter-reachable source, do not substitute silently: tell the user which font is unavailable and obtain their approval before using a fallback.
 - When using a non-system font, add its matching absolute HTTPS stylesheet `<link>` in `<head>` before using the font in slide markup. A font-family name without a head import is invalid for this workflow. Generic/system fallback families do not need an import.
 - Include meaningful `alt` text on images.
@@ -102,6 +104,9 @@ Apply the resolved system consistently, but choose a content-appropriate layout 
 - 1280×720 dimensions present and applied to every slide
 - No overflow, clipping, accidental scrollbars, or off-canvas text
 - No relative/local asset URLs
+- No `data:` URLs or base64-embedded assets
+- Every user-provided image uses the URL returned by the public image-upload endpoint
+- Every icon uses a URL returned by the icon-search endpoint
 - Every font family named by the resolved design is used exactly, or the user explicitly approved the reported fallback
 - Custom fonts used by slide markup are imported or linked from `<head>`
 - No inline `style` attributes or embedded `<style>` blocks
